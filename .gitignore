@@ -1,0 +1,9 @@
+# Generated ELF executables stay local; rebuild for your target system.
+/kernel_info
+/kernel_info_linux
+/kernel_info_linux_x86_64
+/kernel_info_android
+/kernel_info_android_arm64
+*.o
+core
+core.*
