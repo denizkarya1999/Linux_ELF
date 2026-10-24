@@ -2,7 +2,10 @@
 
 Small C programs and experiments for exploring **ELF binary compatibility between GNU/Linux and Android**.
 
-The first program, `kernel_info`, reports the OS name and version, kernel release and build, and machine architecture. Android builds also report the API level. The same source builds for either platform.
+- `kernel_info` reports the OS name and version, kernel release and build, and machine architecture. Android builds also report the API level.
+- `elf_info` reads an ELF file's class, byte order, type, architecture, OS/ABI tag, entry point, interpreter, and direct library dependencies. It never executes the inspected file.
+
+Both programs use the same C source for their GNU/Linux and Android builds.
 
 ## What this project explores
 
@@ -10,12 +13,14 @@ ELF is an executable file format. Sharing that format and a Linux kernel does **
 
 Android uses Bionic as its C library; GNU/Linux builds on Ubuntu normally use glibc. Their loaders and library interfaces differ. See the [Bionic overview](https://android.googlesource.com/platform/bionic/+/main/README.md).
 
-The current program demonstrates **source portability** through separate builds. It does not provide a single universal executable or emulate another CPU.
+The programs demonstrate **source portability** through separate builds. They do not provide a single universal executable or emulate another CPU.
 
 ## Files
 
 - `kernel_info.c` — commented source for Android and GNU/Linux.
+- `elf_info.c` — commented ELF reader for both platforms.
 - `Makefile` — build commands for the host and Android.
+- `tests/test_elf_info.py` — ELF parser regression tests using Python's standard library.
 - `.gitignore` — keeps generated executables out of Git.
 
 ## Build and run on GNU/Linux
@@ -27,13 +32,16 @@ git clone https://github.com/denizkarya1999/Linux_ELF.git
 cd Linux_ELF
 make linux
 ./kernel_info
+./elf_info ./kernel_info
 ```
 
 Or compile directly:
 
 ```bash
 cc -std=c11 -Wall -Wextra -O2 -fPIE -pie kernel_info.c -o kernel_info
+cc -std=c11 -Wall -Wextra -O2 -fPIE -pie elf_info.c -o elf_info
 ./kernel_info
+./elf_info ./kernel_info
 ```
 
 This builds for the compiler's target architecture. For example, building with the native compiler on an x86-64 Ubuntu PC produces an x86-64 executable.
@@ -48,8 +56,10 @@ Set the NDK path to the version installed on your computer. This example uses ND
 export ANDROID_NDK_HOME="$HOME/Android/Sdk/ndk/28.2.13676358"
 make android
 adb push kernel_info_android /data/local/tmp/kernel_info
-adb shell chmod 755 /data/local/tmp/kernel_info
+adb push elf_info_android /data/local/tmp/elf_info
+adb shell chmod 755 /data/local/tmp/kernel_info /data/local/tmp/elf_info
 adb shell /data/local/tmp/kernel_info
+adb shell /data/local/tmp/elf_info /data/local/tmp/kernel_info
 ```
 
 The default Android build targets `arm64-v8a` (AArch64) and API level 21 or later. Check the device's ABI and API level:
@@ -72,6 +82,19 @@ Use `/data/local/tmp` for ADB execution. Shared storage such as `/sdcard` or `/s
 ## Inspect binary compatibility
 
 Build both targets first, then inspect them without executing them:
+
+```bash
+./elf_info ./kernel_info
+./elf_info ./kernel_info_android
+```
+
+`elf_info FILE` works with ELF32 and ELF64 files in either little-endian or big-endian byte order, regardless of the inspector's own CPU architecture. `--help` prints usage. A successful inspection exits with status 0; invalid input, unsupported layouts, or read failures return 1 with a diagnostic.
+
+The parser follows program headers (`PT_INTERP`, `PT_DYNAMIC`, and `PT_LOAD`) and resolves `DT_NEEDED` names through `DT_STRTAB`. Section headers are not required, so ordinary stripped executables work. See the [ELF header](https://gabi.xinuos.com/elf/02-eheader.html), [program header](https://gabi.xinuos.com/elf/07-pheader.html), and [dynamic linking](https://gabi.xinuos.com/elf/08-dynamic.html) specifications.
+
+Limits: files must be seekable and no larger than 256 MiB; extended program-header numbering (`PN_XNUM`) is rejected. The dynamic string table must fit in a file-backed load segment. This is a metadata inspector, not a complete ELF validator. It reports direct dependencies only, without locating libraries, checking symbol versions, or resolving transitive dependencies. An OS/ABI tag of 0 is common on both systems and does not identify the operating system. `ET_DYN` can represent either a shared library or a PIE executable, and an absent interpreter alone does not prove static linking.
+
+For comparison with standard tools:
 
 ```bash
 file kernel_info kernel_info_android
@@ -106,8 +129,19 @@ On Android, it reads the release and API level through system properties. On bot
 
 ## Validation so far
 
-- GNU/Linux: compiled with warnings treated as errors and ran successfully on the development Ubuntu x86-64 machine.
-- Android: compiled with NDK r28c for ARM64/API 21 and deployed to a Pixel 8a. On-device execution is left to the user; no cross-platform runtime success is claimed.
+Run the host-side tests with Python 3:
+
+```bash
+make test
+```
+
+Build Android first to include its executables in the tests' `readelf` comparison. The comparison is skipped if `readelf` is unavailable; the synthetic-file tests still run.
+
+- Both programs compile with warnings treated as errors on Ubuntu x86-64 and with NDK r28c for Android ARM64/API 21.
+- GNU/Linux: `kernel_info` runs successfully; `elf_info` reads both GNU/Linux and Android executables and agrees with `readelf` on their class, interpreter, and direct dependencies.
+- Android: `elf_info` is deployed and runs successfully on a Pixel 8a, inspecting both itself and the existing `kernel_info` executable.
+- The parser tests cover 32/64-bit files in both byte orders, virtual-address translation, truncated files, invalid offsets and strings, oversized input, and escaped terminal control bytes.
+- These checks demonstrate the inspector's portability; no single-binary cross-platform execution is claimed.
 
 ## Hashtags
 

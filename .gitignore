@@ -4,6 +4,9 @@
 /kernel_info_linux_x86_64
 /kernel_info_android
 /kernel_info_android_arm64
+/elf_info
+/elf_info_android
+__pycache__/
 *.o
 core
 core.*
