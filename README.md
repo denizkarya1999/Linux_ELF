@@ -4,8 +4,9 @@ Small C programs and experiments for exploring **ELF binary compatibility betwee
 
 - `kernel_info` reports the OS name and version, kernel release and build, and machine architecture. Android builds also report the API level.
 - `elf_info` reads an ELF file's class, byte order, type, architecture, OS/ABI tag, entry point, interpreter, and direct library dependencies. It never executes the inspected file.
+- `abi_info` reports its own build architecture, C type sizes and alignment, byte order, floating-point precision, and example structure layouts.
 
-Both programs use the same C source for their GNU/Linux and Android builds.
+Each program uses a single C source file for its GNU/Linux and Android builds.
 
 ## What this project explores
 
@@ -19,6 +20,7 @@ The programs demonstrate **source portability** through separate builds. They do
 
 - `kernel_info.c` — commented source for Android and GNU/Linux.
 - `elf_info.c` — commented ELF reader for both platforms.
+- `abi_info.c` — commented C data-layout reporter for both platforms.
 - `Makefile` — build commands for the host and Android.
 - `tests/test_elf_info.py` — ELF parser regression tests using Python's standard library.
 - `.gitignore` — keeps generated executables out of Git.
@@ -33,6 +35,7 @@ cd Linux_ELF
 make linux
 ./kernel_info
 ./elf_info ./kernel_info
+./abi_info
 ```
 
 Or compile directly:
@@ -40,8 +43,10 @@ Or compile directly:
 ```bash
 cc -std=c11 -Wall -Wextra -O2 -fPIE -pie kernel_info.c -o kernel_info
 cc -std=c11 -Wall -Wextra -O2 -fPIE -pie elf_info.c -o elf_info
+cc -std=c11 -Wall -Wextra -O2 -fPIE -pie abi_info.c -o abi_info
 ./kernel_info
 ./elf_info ./kernel_info
+./abi_info
 ```
 
 This builds for the compiler's target architecture. For example, building with the native compiler on an x86-64 Ubuntu PC produces an x86-64 executable.
@@ -57,9 +62,11 @@ export ANDROID_NDK_HOME="$HOME/Android/Sdk/ndk/28.2.13676358"
 make android
 adb push kernel_info_android /data/local/tmp/kernel_info
 adb push elf_info_android /data/local/tmp/elf_info
-adb shell chmod 755 /data/local/tmp/kernel_info /data/local/tmp/elf_info
+adb push abi_info_android /data/local/tmp/abi_info
+adb shell chmod 755 /data/local/tmp/kernel_info /data/local/tmp/elf_info /data/local/tmp/abi_info
 adb shell /data/local/tmp/kernel_info
 adb shell /data/local/tmp/elf_info /data/local/tmp/kernel_info
+adb shell /data/local/tmp/abi_info
 ```
 
 The default Android build targets `arm64-v8a` (AArch64) and API level 21 or later. Check the device's ABI and API level:
@@ -121,6 +128,40 @@ Record the build target, device ABI, ELF interpreter, dependencies, exit status,
 
 Static linking may remove a dynamic-loader dependency, but does not guarantee compatibility with another CPU, kernel, or security policy.
 
+## Compare C data layouts with abi_info
+
+`abi_info` takes no file argument: it reports the layout used by its own compiled executable. `--help` shows usage; unexpected arguments return status 1. It reads no target files and changes no system settings.
+
+```bash
+./abi_info
+adb shell /data/local/tmp/abi_info
+```
+
+The report includes:
+
+- Build architecture, compiler, C library headers, and Android minimum API where applicable. These describe the build, not the current OS version or installed library version.
+- Data model (`LP64`, `ILP32`, or `LLP64` when recognized), bits per C byte, pointer storage width, plain `char` signedness, and measured byte order.
+- `sizeof` and C11 `_Alignof` for integer, pointer, floating-point, and platform types including `size_t`, `off_t`, and `time_t`.
+- Floating-point radix, significand precision, and exponent limits. Equal storage sizes can conceal different number formats.
+- `offsetof` results and padding for two structures with the same fields in different orders. The examples use ordinary alignment rather than packed structs.
+
+On the tested Ubuntu x86-64 PC and Android ARM64 Pixel 8a:
+
+| Measurement | Ubuntu x86-64 | Android ARM64 |
+| --- | --- | --- |
+| Data model | LP64 | LP64 |
+| Pointer storage | 64 bits | 64 bits |
+| Byte order | Little-endian | Little-endian |
+| Plain `char` | Signed | Unsigned |
+| `long double` size / alignment | 16 / 16 bytes | 16 / 16 bytes |
+| `long double` significand precision | 64 binary digits | 113 binary digits |
+| `{ char; double; int; }` size / padding | 24 / 11 bytes | 24 / 11 bytes |
+| `{ double; int; char; }` size / padding | 16 / 3 bytes | 16 / 3 bytes |
+
+These are results from these particular builds, not universal values for every GNU/Linux or Android system. Compiler options can also change data layout. Neither this report nor matching layouts establishes compatible calling conventions, instruction sets, symbol versions, or library behavior. Do not use raw struct memory as a portable file or network format.
+
+For the language rules, see the [C11 committee draft](https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf), sections 6.5.3.4 (`sizeof` and `_Alignof`), 7.19 (`offsetof`), and 5.2.4.2.2 (floating-point characteristics). Android-specific conventions are documented in the [Android ABI guide](https://developer.android.com/ndk/guides/abis).
+
 ## OS information
 
 On GNU/Linux, the program reads `NAME`, `VERSION`, and, if needed, `VERSION_ID` from `/etc/os-release`, falling back to `/usr/lib/os-release`. Missing information uses a fallback label. See the [os-release specification](https://www.freedesktop.org/software/systemd/man/latest/os-release.html).
@@ -137,9 +178,10 @@ make test
 
 Build Android first to include its executables in the tests' `readelf` comparison. The comparison is skipped if `readelf` is unavailable; the synthetic-file tests still run.
 
-- Both programs compile with warnings treated as errors on Ubuntu x86-64 and with NDK r28c for Android ARM64/API 21.
+- All three programs compile with warnings treated as errors on Ubuntu x86-64 and with NDK r28c for Android ARM64/API 21.
 - GNU/Linux: `kernel_info` runs successfully; `elf_info` reads both GNU/Linux and Android executables and agrees with `readelf` on their class, interpreter, and direct dependencies.
 - Android: `elf_info` is deployed and runs successfully on a Pixel 8a, inspecting both itself and the existing `kernel_info` executable.
+- `abi_info` runs successfully on both devices; the measured comparison is recorded above. Its `--help` and invalid-argument behavior were also checked on Ubuntu.
 - The parser tests cover 32/64-bit files in both byte orders, virtual-address translation, truncated files, invalid offsets and strings, oversized input, and escaped terminal control bytes.
 - These checks demonstrate the inspector's portability; no single-binary cross-platform execution is claimed.
 

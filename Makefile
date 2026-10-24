@@ -5,7 +5,7 @@ ANDROID_TARGET ?= aarch64-linux-android
 NDK_HOST_TAG ?= linux-x86_64
 ANDROID_CC = $(ANDROID_NDK_HOME)/toolchains/llvm/prebuilt/$(NDK_HOST_TAG)/bin/$(ANDROID_TARGET)$(ANDROID_API)-clang
 
-PROGRAMS = kernel_info elf_info
+PROGRAMS = kernel_info elf_info abi_info
 
 .PHONY: all linux android test clean
 all: linux

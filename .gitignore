@@ -6,6 +6,8 @@
 /kernel_info_android_arm64
 /elf_info
 /elf_info_android
+/abi_info
+/abi_info_android
 __pycache__/
 *.o
 core
